@@ -1,5 +1,5 @@
 /**
- * Auto Scheduler Pro - Popup Script
+ * Popup Script
  */
 document.addEventListener('DOMContentLoaded', () => {
   // Elements
