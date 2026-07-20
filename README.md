@@ -6,7 +6,7 @@ A lightweight chrome extension that scans and parses emails locally. Suggesting 
 
 
 
-## Installation
+## Run Locally
 
 Download all the files in one empty folder of your choice
 
@@ -21,6 +21,10 @@ ASE v.x.x.x
 ```
 
 Head over to [chrome://extensions](chrome://extensions) and click "Load unpacked" and select the empty folder
+
+
+! Enable Developer mode
+
 
 ## Features
 
