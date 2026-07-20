@@ -1,5 +1,5 @@
 /**
- * Auto Scheduler Pro - Content Script
+ * Content Script
  */
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

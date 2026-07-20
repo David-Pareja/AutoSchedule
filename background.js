@@ -1,11 +1,11 @@
 /**
- * Auto Scheduler Pro - Background Worker
+ * Background Worker
  */
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "add-selection-to-scheduler",
-    title: "Parse Highlight with Auto Scheduler",
+    title: "Parse Text to Scheduler",
     contexts: ["selection"]
   });
 });
