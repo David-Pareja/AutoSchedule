@@ -1,7 +1,7 @@
 
 # Auto Schedule Extension
 
-A lightweight chrome extension that scans and parses emails locally. Suggesting to add to the schedule with out any hassles. 
+A lightweight chrome extension that scans and parses emails locally. Suggesting to add to the schedule with out any hassles. Currently work in progress so don't expect it to work.
 
 
 
@@ -32,10 +32,10 @@ Head over to [chrome://extensions](chrome://extensions) and click "Load unpacked
 - Selections of preferred calender 
 - Highlight text and right click to parse specific info
 
-
 ## Roadmap
 
 - Additional browser support
 - Eventually make a button in the email itself if it detects an event 
-
+- Color Wheel theme
+- Fix not parsing correctly on certain emails 
 
