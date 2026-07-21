@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Auto Scheduler",
-  "version": "2.0.0",
-  "description": "Scrapes relative dates dynamically from email timestamps and exports to Google, Outlook, or Apple Calendar.",
+  "name": "SmartSchedule",
+  "version": "2.1.0",
+  "description": "Parses relative dates from email content and exports events to Google, Outlook, or Apple Calendar.",
   "permissions": [
     "activeTab",
     "contextMenus",
