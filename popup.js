@@ -4,8 +4,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const syncBtn = document.getElementById('sync-btn');
   const navMain = document.getElementById('nav-main');
   const navSettings = document.getElementById('nav-settings');
+  const navInfo = document.getElementById('nav-info');
   const viewMain = document.getElementById('view-main');
   const viewSettings = document.getElementById('view-settings');
+  const viewInfo = document.getElementById('view-info');
+  const unsupportedBanner = document.getElementById('unsupported-banner');
+  const dismissForeverBtn = document.getElementById('dismiss-forever-btn');
+  const whitelistListEl = document.getElementById('whitelist-list');
+  const whitelistInput = document.getElementById('whitelist-input');
+  const whitelistAddBtn = document.getElementById('whitelist-add-btn');
   const themeSelect = document.getElementById('setting-theme');
   const calendarSelect = document.getElementById('setting-calendar');
   const customColorGroup = document.getElementById('custom-color-group');
@@ -13,9 +20,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const debugToggle = document.getElementById('setting-debug');
   const debugPanel = document.getElementById('debug-panel');
   const debugLog = document.getElementById('debug-log');
+  const noAnimToggle = document.getElementById('setting-no-animations');
+  const tabIndicator = document.getElementById('tab-indicator');
+  const tabViewport = document.querySelector('.tab-viewport');
+
+  const infoVersionEl = document.getElementById('info-version');
+  if (infoVersionEl) infoVersionEl.textContent = `v${chrome.runtime.getManifest().version}`;
+
+  const DEFAULT_WHITELIST = ['mail.google.com', 'outlook.live.com', 'outlook.office.com', 'outlook.office365.com', 'outlook.cloud.microsoft'];
+  let currentWhitelist = DEFAULT_WHITELIST.slice();
+  let currentHostname = '';
+  let siteIsUnsupportedLocked = false;
 
   chrome.storage.local.get(
-    ['theme', 'calendarChoice', 'customColor', 'debugMode', 'highlightedEvent', 'lastParsed'],
+    ['theme', 'calendarChoice', 'customColor', 'debugMode', 'animationsDisabled', 'hasOpenedPopupBefore', 'whitelistedSites', 'highlightedEvent', 'lastParsed'],
     (data) => {
       themeSelect.value = data.theme || 'auto';
       calendarSelect.value = data.calendarChoice || 'google';
@@ -24,6 +42,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
       debugToggle.checked = !!data.debugMode;
       debugPanel.style.display = debugToggle.checked ? 'block' : 'none';
+
+      noAnimToggle.checked = !!data.animationsDisabled;
+      document.documentElement.classList.toggle('no-animations', noAnimToggle.checked);
+
+      currentWhitelist = Array.isArray(data.whitelistedSites) ? data.whitelistedSites : DEFAULT_WHITELIST.slice();
+      if (!Array.isArray(data.whitelistedSites)) chrome.storage.local.set({ whitelistedSites: currentWhitelist });
+      renderWhitelist(currentWhitelist);
+
+      const isFirstOpen = !data.hasOpenedPopupBefore;
+      chrome.storage.local.set({ hasOpenedPopupBefore: true });
+      runIntroAnimation(isFirstOpen, noAnimToggle.checked);
+      positionTabIndicator(navMain);
 
       if (data.highlightedEvent) {
         populateForm(data.highlightedEvent);
@@ -37,14 +67,187 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   );
 
+  // Elements animated in top-to-bottom on popup open: the header, the tab
+  // bar, then every top-level field group of the (visible-by-default)
+  // Schedule view. First-ever open gets a slower, richer "grow in" over 2s;
+  // every open after that gets a quicker plain fade over 0.6s (fast enough
+  // not to be annoying once the novelty of the first run has worn off).
+  function runIntroAnimation(isFirstOpen, animationsDisabled) {
+    if (animationsDisabled) return;
+
+    const elements = [document.querySelector('.header'), document.querySelector('.tab-bar'), ...Array.from(viewMain.children)];
+    const totalDuration = isFirstOpen ? 2000 : 600;
+    const singleDuration = isFirstOpen ? 450 : 220;
+    const animationName = isFirstOpen ? 'pop-in' : 'fade-in';
+    const delayStep = elements.length > 1 ? (totalDuration - singleDuration) / (elements.length - 1) : 0;
+
+    elements.forEach((el, i) => {
+      el.style.opacity = '0';
+      el.style.animation = `${animationName} ${singleDuration}ms ease ${Math.round(i * delayStep)}ms forwards`;
+    });
+  }
+
+  // Slides the shared underline bar under whichever tab button is active.
+  function positionTabIndicator(btn) {
+    const barRect = tabIndicator.parentElement.getBoundingClientRect();
+    const btnRect = btn.getBoundingClientRect();
+    tabIndicator.style.width = `${btnRect.width}px`;
+    tabIndicator.style.transform = `translateX(${btnRect.left - barRect.left}px)`;
+  }
+
+  const TAB_VIEWS = { main: viewMain, settings: viewSettings, info: viewInfo };
+  const TAB_BTNS = { main: navMain, settings: navSettings, info: navInfo };
+  const TAB_ORDER = ['main', 'settings', 'info'];
+  let currentTab = 'main';
+
+  // Swaps the Schedule/Settings panels with a "swipe to the next desktop"
+  // style transition: the outgoing panel and incoming panel briefly overlap
+  // (absolutely positioned) and slide past each other in the direction that
+  // matches moving forward/backward through the tab order.
+  function switchTab(target) {
+    if (target === currentTab) return;
+    const outgoingView = TAB_VIEWS[currentTab];
+    const incomingView = TAB_VIEWS[target];
+    TAB_BTNS[currentTab].classList.remove('active');
+    TAB_BTNS[target].classList.add('active');
+    positionTabIndicator(TAB_BTNS[target]);
+
+    if (document.documentElement.classList.contains('no-animations')) {
+      outgoingView.classList.remove('active');
+      incomingView.classList.add('active');
+      currentTab = target;
+      return;
+    }
+
+    const goingForward = TAB_ORDER.indexOf(target) > TAB_ORDER.indexOf(currentTab);
+    const startHeight = outgoingView.offsetHeight;
+
+    tabViewport.style.height = `${startHeight}px`;
+    outgoingView.classList.add('sliding');
+    incomingView.classList.add('sliding', 'active');
+    incomingView.style.transition = 'none';
+    incomingView.style.transform = `translateX(${goingForward ? '100%' : '-100%'})`;
+    incomingView.offsetHeight; // force reflow before re-enabling the transition
+    incomingView.style.transition = '';
+
+    const endHeight = incomingView.scrollHeight;
+    requestAnimationFrame(() => {
+      outgoingView.style.transform = `translateX(${goingForward ? '-100%' : '100%'})`;
+      incomingView.style.transform = 'translateX(0)';
+      tabViewport.style.transition = 'height 0.3s ease';
+      tabViewport.style.height = `${endHeight}px`;
+    });
+
+    setTimeout(() => {
+      outgoingView.classList.remove('active', 'sliding');
+      outgoingView.style.transform = '';
+      incomingView.classList.remove('sliding');
+      incomingView.style.transform = '';
+      tabViewport.style.height = '';
+      tabViewport.style.transition = '';
+      currentTab = target;
+    }, 320);
+  }
+
+  // Greys out the Schedule tab on an unsupported site: single-clicking it
+  // does nothing (a tooltip explains why on hover), but double-clicking
+  // unlocks manual entry for the rest of this popup session and reveals the
+  // "Dismiss forever" banner. The lock reappears on the next open unless the
+  // user dismisses it forever for this site.
+  function lockScheduleTab() {
+    siteIsUnsupportedLocked = true;
+    navMain.classList.add('tab-locked');
+    navMain.title = "This site isn't supported for auto-parsing. Double-click to add event details manually and export to your calendar.";
+  }
+
+  function unlockScheduleTab() {
+    siteIsUnsupportedLocked = false;
+    navMain.classList.remove('tab-locked');
+    navMain.removeAttribute('title');
+    syncBtn.disabled = false;
+    unsupportedBanner.style.display = 'flex';
+    if (currentTab !== 'main') switchTab('main');
+  }
+
   navMain.addEventListener('click', () => {
-    navMain.classList.add('active'); navSettings.classList.remove('active');
-    viewMain.classList.add('active'); viewSettings.classList.remove('active');
+    if (siteIsUnsupportedLocked) return;
+    switchTab('main');
   });
-  navSettings.addEventListener('click', () => {
-    navSettings.classList.add('active'); navMain.classList.remove('active');
-    viewSettings.classList.add('active'); viewMain.classList.remove('active');
+  navMain.addEventListener('dblclick', () => {
+    if (siteIsUnsupportedLocked) unlockScheduleTab();
   });
+  navSettings.addEventListener('click', () => switchTab('settings'));
+  navInfo.addEventListener('click', () => switchTab('info'));
+
+  dismissForeverBtn.addEventListener('click', () => {
+    unsupportedBanner.style.display = 'none';
+    if (!currentHostname) return;
+    chrome.storage.local.get(['dismissedUnsupportedHosts'], (data) => {
+      const list = Array.isArray(data.dismissedUnsupportedHosts) ? data.dismissedUnsupportedHosts : [];
+      if (!list.includes(currentHostname)) {
+        list.push(currentHostname);
+        chrome.storage.local.set({ dismissedUnsupportedHosts: list });
+      }
+    });
+  });
+
+  noAnimToggle.addEventListener('change', (e) => {
+    chrome.storage.local.set({ animationsDisabled: e.target.checked });
+    document.documentElement.classList.toggle('no-animations', e.target.checked);
+  });
+
+  // ---------- Whitelist ----------
+
+  function getHostname(url) {
+    try { return new URL(url).hostname; } catch (e) { return ''; }
+  }
+
+  function normalizeHostInput(raw) {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    try {
+      return new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`).hostname;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function renderWhitelist(list) {
+    whitelistListEl.innerHTML = '';
+    list.forEach((host) => {
+      const row = document.createElement('div');
+      row.className = 'whitelist-item';
+      const label = document.createElement('span');
+      label.textContent = host;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'remove-btn';
+      removeBtn.textContent = '×';
+      removeBtn.setAttribute('aria-label', `Remove ${host}`);
+      removeBtn.addEventListener('click', () => {
+        currentWhitelist = currentWhitelist.filter((h) => h !== host);
+        chrome.storage.local.set({ whitelistedSites: currentWhitelist });
+        renderWhitelist(currentWhitelist);
+      });
+      row.appendChild(label);
+      row.appendChild(removeBtn);
+      whitelistListEl.appendChild(row);
+    });
+  }
+
+  whitelistAddBtn.addEventListener('click', addWhitelistEntry);
+  whitelistInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addWhitelistEntry();
+  });
+
+  function addWhitelistEntry() {
+    const hostname = normalizeHostInput(whitelistInput.value);
+    whitelistInput.value = '';
+    if (!hostname || currentWhitelist.includes(hostname)) return;
+    currentWhitelist.push(hostname);
+    chrome.storage.local.set({ whitelistedSites: currentWhitelist });
+    renderWhitelist(currentWhitelist);
+  }
 
   themeSelect.addEventListener('change', (e) => {
     chrome.storage.local.set({ theme: e.target.value });
@@ -152,43 +355,105 @@ document.addEventListener('DOMContentLoaded', () => {
     return luminance > 0.6 ? '#000000' : '#ffffff';
   }
 
+  function setStatusIndicator(stateClass, label) {
+    statusEl.className = `status-indicator ${stateClass}`;
+    statusEl.innerHTML = `<span class="status-dot"></span>${label}`;
+  }
+
+  const NATIVE_HOSTS = ['mail.google.com', 'outlook.live.com', 'outlook.office.com', 'outlook.office365.com', 'outlook.cloud.microsoft'];
+
+  function isNativeHost(hostname) {
+    return NATIVE_HOSTS.some((h) => hostname === h || hostname.endsWith(`.${h}`));
+  }
+
+  // native = Gmail/Outlook, with real selector-based parsing built in.
+  // whitelisted = a site the user added; we still attempt to scan it (via
+  // on-demand script injection, since it isn't a declared content-script
+  // host) but the built-in selectors almost certainly won't match its DOM.
+  // unsupported = neither — never bother parsing, to save resources.
+  function classifySite(hostname) {
+    if (isNativeHost(hostname)) return 'native';
+    if (currentWhitelist.includes(hostname)) return 'whitelisted';
+    return 'unsupported';
+  }
+
   function executeParser(cachedParsed) {
-    statusEl.innerText = "• Parsing...";
-    statusEl.className = "status-indicator status-parsing";
+    setStatusIndicator('status-parsing', 'Parsing...');
+    unsupportedBanner.style.display = 'none';
+    navMain.classList.remove('tab-locked');
+    navMain.removeAttribute('title');
+    siteIsUnsupportedLocked = false;
 
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs[0]) return;
       const url = tabs[0].url || "";
-      const isSupported = url.includes('mail.google') || url.includes('outlook.live') || url.includes('outlook.office') || url.includes('outlook.cloud.microsoft');
+      currentHostname = getHostname(url);
+      const status = classifySite(currentHostname);
 
-      if (!isSupported) {
-        statusEl.innerText = "• Offline";
-        statusEl.className = "status-indicator status-offline";
-        scanTimeField.innerText = "Unsupported Site";
+      if (status === 'unsupported') {
+        setStatusIndicator('status-offline', 'Unsupported Site');
+        scanTimeField.innerText = "Not on whitelist";
         syncBtn.disabled = true;
+        chrome.storage.local.get(['dismissedUnsupportedHosts'], (data) => {
+          const dismissed = Array.isArray(data.dismissedUnsupportedHosts) && data.dismissedUnsupportedHosts.includes(currentHostname);
+          if (dismissed) {
+            syncBtn.disabled = false;
+          } else {
+            lockScheduleTab();
+          }
+        });
         return;
       }
 
-      chrome.tabs.sendMessage(tabs[0].id, { action: "scan_email_content" }, (response) => {
-        if (chrome.runtime.lastError || !response || !response.parsedData) {
-          if (cachedParsed) {
-            populateForm(cachedParsed);
-            renderDebugPanel(cachedParsed.debug, 'Cached scan (live message channel unavailable)');
+      if (status === 'native') {
+        chrome.tabs.sendMessage(tabs[0].id, { action: "scan_email_content" }, (response) => {
+          if (chrome.runtime.lastError || !response || !response.parsedData) {
+            if (cachedParsed) {
+              populateForm(cachedParsed);
+              renderDebugPanel(cachedParsed.debug, 'Cached scan (live message channel unavailable)');
+            }
+            setLiveStatus();
+            return;
           }
+          populateForm(response.parsedData);
+          renderDebugPanel(response.parsedData.debug, 'Live email scan');
           setLiveStatus();
-          return;
-        }
-        populateForm(response.parsedData);
-        renderDebugPanel(response.parsedData.debug, 'Live email scan');
-        setLiveStatus();
-      });
+        });
+        return;
+      }
+
+      // Whitelisted, non-native site: the static content_scripts declaration
+      // never matches here, so inject on demand via activeTab + scripting
+      // (granted for the tab the popup was opened against) and try anyway.
+      chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, files: ['dateParser.js', 'content.js'] })
+        .then(() => {
+          chrome.tabs.sendMessage(tabs[0].id, { action: "scan_email_content" }, (response) => {
+            if (chrome.runtime.lastError || !response || !response.parsedData) {
+              if (cachedParsed) {
+                populateForm(cachedParsed);
+                renderDebugPanel(cachedParsed.debug, 'Cached scan (whitelisted site, live channel unavailable)');
+              }
+              setWhitelistedStatus();
+              return;
+            }
+            populateForm(response.parsedData);
+            renderDebugPanel(response.parsedData.debug, 'Live email scan (whitelisted site)');
+            setWhitelistedStatus();
+          });
+        })
+        .catch(() => setWhitelistedStatus());
     });
   }
 
   function setLiveStatus() {
-    statusEl.innerText = "• Live Connection";
-    statusEl.className = "status-indicator status-live";
+    setStatusIndicator('status-live', 'Supported Site');
     scanTimeField.innerText = `Scanned: ${new Date().toLocaleTimeString()}`;
+    syncBtn.disabled = false;
+  }
+
+  function setWhitelistedStatus() {
+    setStatusIndicator('status-warning', 'Unsupported');
+    scanTimeField.innerText = 'Might not work as intended';
     syncBtn.disabled = false;
   }
 

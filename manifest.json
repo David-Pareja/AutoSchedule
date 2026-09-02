@@ -6,6 +6,7 @@
   "permissions": [
     "activeTab",
     "contextMenus",
+    "scripting",
     "storage"
   ],
   "host_permissions": [
@@ -25,13 +26,25 @@
         "*://outlook.live.com/*",
         "*://outlook.office.com/*",
         "*://outlook.office365.com/*",
-    "*://outlook.cloud.microsoft/*"
+        "*://outlook.cloud.microsoft/*"
       ],
       "js": ["dateParser.js", "content.js"],
       "run_at": "document_idle"
     }
   ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   }
 }

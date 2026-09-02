@@ -16,7 +16,9 @@
       --brand-text: #ffffff;
       --status-parsing: #f59e0b;
       --status-live: #059669;
+      --status-live-rgb: 5, 150, 105;
       --status-offline: #ef4444;
+      --status-warning: #ca8a04;
     }
     [data-theme="dark"] {
       --bg: #111827;
@@ -33,6 +35,7 @@
       background-color: var(--bg); color: var(--text);
       transition: background-color 0.2s, color 0.2s;
     }
+    a { color: inherit; }
 
     .header {
       display: flex; justify-content: space-between; align-items: center;
@@ -41,24 +44,39 @@
     .logo-section { display: flex; align-items: center; gap: 8px; }
     .logo-badge {
       width: 20px; height: 20px; border-radius: 4px;
-      background-color: var(--brand); color: var(--brand-text);
-      display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 900;
+      background-color: var(--brand);
+      display: flex; align-items: center; justify-content: center;
     }
     .app-title { font-size: 13px; font-weight: 800; margin: 0; letter-spacing: -0.02em; }
-    .status-section { display: flex; flex-direction: column; align-items: flex-end; font-size: 9px; color: var(--text-muted); }
-    .status-indicator { font-weight: 700; margin-bottom: 1px; }
+    .status-section { display: flex; flex-direction: column; align-items: flex-end; font-size: 9px; color: var(--text-muted); text-align: right; }
+    .status-indicator { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; margin-bottom: 1px; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
     .status-parsing { color: var(--status-parsing); }
     .status-live { color: var(--status-live); }
     .status-offline { color: var(--status-offline); }
-
-    .tab-bar { display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
-    .tab-btn {
-      background: none; border: none; padding: 6px 10px; font-size: 11px; font-weight: 700;
-      color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent;
+    .status-warning { color: var(--status-warning); }
+    .status-live .status-dot { animation: status-pulse 1.6s ease-in-out infinite; }
+    @keyframes status-pulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(var(--status-live-rgb), 0.55); }
+      50% { transform: scale(1.15); box-shadow: 0 0 0 3px rgba(var(--status-live-rgb), 0); }
     }
-    .tab-btn.active { color: var(--text); border-bottom: 2px solid var(--brand); }
-    .tab-content { display: none; }
+
+    .tab-bar { display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); position: relative; }
+    .tab-btn {
+      background: none; border: none; padding: 6px 10px 8px; font-size: 11px; font-weight: 700;
+      color: var(--text-muted); cursor: pointer; transition: opacity 0.15s ease;
+    }
+    .tab-btn.active { color: var(--text); }
+    .tab-btn.tab-locked { opacity: 0.35; cursor: not-allowed; }
+    .tab-indicator {
+      position: absolute; bottom: -1px; left: 0; height: 2px; background-color: var(--brand);
+      transition: transform 0.25s ease, width 0.25s ease;
+    }
+
+    .tab-viewport { position: relative; overflow: hidden; }
+    .tab-content { display: none; transition: transform 0.3s ease; }
     .tab-content.active { display: block; }
+    .tab-content.sliding { display: block; position: absolute; top: 0; left: 0; width: 100%; }
 
     .form-group { margin-bottom: 10px; }
     .form-group label {
@@ -84,16 +102,76 @@
     }
     .btn-submit:hover { opacity: 0.8; }
     .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .unsupported-banner {
+      display: none; align-items: center; justify-content: space-between; gap: 8px;
+      background-color: var(--input-bg); border: 1px solid var(--input-border); border-radius: 4px;
+      padding: 7px 8px; margin-bottom: 10px; font-size: 9px; color: var(--text-muted); line-height: 1.4;
+    }
+    .unsupported-banner button {
+      flex: 0 0 auto; font-size: 9px; font-weight: 700; padding: 5px 8px; border-radius: 4px;
+      border: 1px solid var(--input-border); background-color: var(--bg); color: var(--text);
+      cursor: pointer; white-space: nowrap;
+    }
+    .unsupported-banner button:hover { opacity: 0.7; }
+
+    .whitelist-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+    .whitelist-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 5px 8px; background-color: var(--input-bg); border: 1px solid var(--input-border);
+      border-radius: 4px; font-size: 11px;
+    }
+    .whitelist-item .remove-btn {
+      background: none; border: none; color: var(--text-muted); cursor: pointer;
+      font-size: 14px; line-height: 1; padding: 0 2px;
+    }
+    .whitelist-item .remove-btn:hover { color: var(--status-offline); }
+    .whitelist-add-row { display: flex; gap: 6px; }
+    .whitelist-add-row .form-input { flex: 1; }
+    .whitelist-add-row button {
+      flex: 0 0 auto; font-size: 11px; font-weight: 700; padding: 6px 12px; border-radius: 4px;
+      background-color: var(--brand); color: var(--brand-text); border: 1px solid var(--brand); cursor: pointer;
+    }
+    .whitelist-add-row button:hover { opacity: 0.8; }
+    .whitelist-hint { font-size: 9px; color: var(--text-muted); margin-top: 4px; }
+
+    .info-block { font-size: 11px; line-height: 1.6; color: var(--text-muted); }
+    .info-block strong { color: var(--text); }
+    .info-block a { text-decoration: underline; }
+
+    /* ---------- Intro animation ---------- */
+    @keyframes pop-in {
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    @keyframes fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    /* Global kill switch for the "Disable Animations" setting */
+    .no-animations, .no-animations * {
+      animation-duration: 0s !important;
+      animation-delay: 0s !important;
+      transition-duration: 0s !important;
+    }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="logo-section">
-      <div class="logo-badge">SS</div>
+      <div class="logo-badge">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
+          <rect x="7" y="2" width="2" height="5" rx="1" fill="var(--brand-text)"/>
+          <rect x="15" y="2" width="2" height="5" rx="1" fill="var(--brand-text)"/>
+          <rect x="3" y="5" width="18" height="16" rx="2" fill="none" stroke="var(--brand-text)" stroke-width="2"/>
+          <rect x="3" y="5" width="18" height="6" rx="2" fill="var(--brand-text)"/>
+        </svg>
+      </div>
       <h1 class="app-title">SmartSchedule</h1>
     </div>
     <div class="status-section">
-      <span id="status-text" class="status-indicator status-parsing">• Parsing...</span>
+      <span id="status-text" class="status-indicator status-parsing"><span class="status-dot"></span>Parsing...</span>
       <span id="scan-time">Waiting...</span>
     </div>
   </div>
@@ -101,89 +179,126 @@
   <div class="tab-bar">
     <button id="nav-main" class="tab-btn active">Schedule</button>
     <button id="nav-settings" class="tab-btn">Settings</button>
+    <button id="nav-info" class="tab-btn">Info</button>
+    <div id="tab-indicator" class="tab-indicator"></div>
   </div>
 
-  <div id="view-main" class="tab-content active">
-    <div class="form-group">
-      <label>Event Title</label>
-      <input type="text" id="event-title" class="form-input">
+  <div class="tab-viewport">
+    <div id="view-main" class="tab-content active">
+      <div id="unsupported-banner" class="unsupported-banner">
+        <span>Manual entry mode — this site isn't auto-parsed.</span>
+        <button id="dismiss-forever-btn" type="button">Dismiss forever</button>
+      </div>
+
+      <div class="form-group">
+        <label>Event Title</label>
+        <input type="text" id="event-title" class="form-input">
+      </div>
+
+      <div class="grid-2">
+        <div class="form-group">
+          <label>Parsed Date</label>
+          <input type="date" id="event-date" class="form-input" required>
+        </div>
+        <div class="form-group">
+          <label>Parsed Time</label>
+          <input type="time" id="event-time" class="form-input" required>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="form-group">
+          <label>Duration</label>
+          <select id="event-duration" class="form-input">
+            <option value="30">30 Min</option>
+            <option value="45">45 Min</option>
+            <option value="60" selected>1 Hour</option>
+            <option value="120">2 Hours</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Location</label>
+          <input type="text" id="event-location" class="form-input">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Meeting context & Description</label>
+        <textarea id="event-desc" class="form-input"></textarea>
+      </div>
+
+      <button id="sync-btn" class="btn-submit" disabled>
+        Export to Calendar
+      </button>
     </div>
 
-    <div class="grid-2">
+    <div id="view-settings" class="tab-content">
       <div class="form-group">
-        <label>Parsed Date</label>
-        <input type="date" id="event-date" class="form-input" required>
-      </div>
-      <div class="form-group">
-        <label>Parsed Time</label>
-        <input type="time" id="event-time" class="form-input" required>
-      </div>
-    </div>
-
-    <div class="grid-2">
-      <div class="form-group">
-        <label>Duration</label>
-        <select id="event-duration" class="form-input">
-          <option value="30">30 Min</option>
-          <option value="45">45 Min</option>
-          <option value="60" selected>1 Hour</option>
-          <option value="120">2 Hours</option>
+        <label>Theme Preference</label>
+        <select id="setting-theme" class="form-input">
+          <option value="auto">System Default (Auto)</option>
+          <option value="light">Light Mode</option>
+          <option value="dark">Dark Mode</option>
+          <option value="custom">Custom Color</option>
         </select>
       </div>
+      <div class="form-group" id="custom-color-group" style="display:none;">
+        <label>Custom Accent Color</label>
+        <input type="color" id="setting-custom-color" class="form-input" value="#6366f1">
+      </div>
       <div class="form-group">
-        <label>Location</label>
-        <input type="text" id="event-location" class="form-input">
+        <label>Calendar Destination</label>
+        <select id="setting-calendar" class="form-input">
+          <option value="google">Google Calendar</option>
+          <option value="outlook">Outlook Calendar</option>
+          <option value="apple">Apple / iCloud (.ics)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Whitelisted Websites</label>
+        <div id="whitelist-list" class="whitelist-list"></div>
+        <div class="whitelist-add-row">
+          <input type="text" id="whitelist-input" class="form-input" placeholder="e.g. mail.yahoo.com">
+          <button id="whitelist-add-btn" type="button">Add</button>
+        </div>
+        <div class="whitelist-hint">
+          Adding a site lets SmartSchedule attempt to scan it, but only Gmail and Outlook have dedicated parsing built in — other sites will likely not work as intended.
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
+          <span>Disable Animations</span>
+          <input type="checkbox" id="setting-no-animations" style="width:auto;">
+        </label>
+      </div>
+      <div class="form-group">
+        <label style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
+          <span>Debug Mode</span>
+          <input type="checkbox" id="setting-debug" style="width:auto;">
+        </label>
+        <div style="font-size:9px; color:var(--text-muted); margin-top:2px;">
+          Shows exactly where each parsed field came from: which selector matched, which attribute or label supplied the text, and why one date/time candidate was chosen over another.
+        </div>
+      </div>
+      <div id="debug-panel" class="form-group" style="display:none;">
+        <label>Parse Debug Log</label>
+        <pre id="debug-log" style="white-space:pre-wrap; word-break:break-word; max-height:180px; overflow-y:auto; background:var(--input-bg); border:1px solid var(--input-border); border-radius:4px; padding:6px 8px; font-size:9px; line-height:1.4; margin:0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">No parse data yet.</pre>
+      </div>
+
+      <div style="margin-top:20px; font-size:10px; color:var(--text-muted); text-align:center;">
+        Settings automatically saved.
       </div>
     </div>
 
-    <div class="form-group">
-      <label>Meeting context & Description</label>
-      <textarea id="event-desc" class="form-input"></textarea>
-    </div>
-
-    <button id="sync-btn" class="btn-submit" disabled>
-      Sync to Calendar
-    </button>
-  </div>
-
-  <div id="view-settings" class="tab-content">
-    <div class="form-group">
-      <label>Theme Preference</label>
-      <select id="setting-theme" class="form-input">
-        <option value="auto">System Default (Auto)</option>
-        <option value="light">Light Mode</option>
-        <option value="dark">Dark Mode</option>
-        <option value="custom">Custom Color</option>
-      </select>
-    </div>
-    <div class="form-group" id="custom-color-group" style="display:none;">
-      <label>Custom Accent Color</label>
-      <input type="color" id="setting-custom-color" class="form-input" value="#6366f1">
-    </div>
-    <div class="form-group">
-      <label>Calendar Destination</label>
-      <select id="setting-calendar" class="form-input">
-        <option value="google">Google Calendar</option>
-        <option value="outlook">Outlook Calendar</option>
-        <option value="apple">Apple / iCloud (.ics)</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
-        <span>Debug Mode</span>
-        <input type="checkbox" id="setting-debug" style="width:auto;">
-      </label>
-      <div style="font-size:9px; color:var(--text-muted); margin-top:2px;">
-        Shows exactly where each parsed field came from: which selector matched, which attribute or label supplied the text, and why one date/time candidate was chosen over another.
+    <div id="view-info" class="tab-content">
+      <div class="info-block">
+        <p><strong>SmartSchedule</strong> <span id="info-version"></span></p>
+        <p>Parses relative dates, times, and locations out of Gmail/Outlook emails so you can add them to your calendar without retyping everything by hand.</p>
+        <p>Source code: <a href="https://github.com/David-Pareja/ASE-v.1.0.4" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+        <p>Created by <strong>David Pareja</strong>.</p>
       </div>
-    </div>
-    <div id="debug-panel" class="form-group" style="display:none;">
-      <label>Parse Debug Log</label>
-      <pre id="debug-log" style="white-space:pre-wrap; word-break:break-word; max-height:180px; overflow-y:auto; background:var(--input-bg); border:1px solid var(--input-border); border-radius:4px; padding:6px 8px; font-size:9px; line-height:1.4; margin:0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">No parse data yet.</pre>
-    </div>
-
-    <div style="margin-top:20px; font-size:10px; color:var(--text-muted); text-align:center;">
-      Settings automatically saved.
     </div>
   </div>
 
