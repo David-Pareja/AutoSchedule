@@ -1,9 +1,5 @@
 /* Content script: parses email bodies and watches for SPA navigation */
 
-const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july',
-                'august', 'september', 'october', 'november', 'december'];
-
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "scan_email_content") {
     sendResponse({ parsedData: scanCurrentEmail() });
@@ -12,176 +8,236 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 function scanCurrentEmail() {
-  const emailBody = grabActiveEmailBody();
-  const emailDate = grabActiveEmailDate();
-  return parseTextWithBaseDate(emailBody, emailDate, location.href);
+  const container = locateBodyContainer();
+  const body = grabActiveEmailBody(container);
+  const emailDate = grabActiveEmailDate(container);
+  const smartCardText = findSmartEventCardText(container);
+  // Feed the smart-card text in as a synthetic "When:" line ahead of the real
+  // body — this reuses the existing label-matching logic as-is and naturally
+  // wins over anything found later in the body, without touching the
+  // description/location, which still reflect the actual message text.
+  const dateTimeText = smartCardText ? `When: ${smartCardText}\n${body.text}` : body.text;
+  return parseTextWithBaseDate(body.text, dateTimeText, emailDate.date, location.href, body.debug, emailDate.debug, smartCardText);
 }
 
-function grabActiveEmailDate() {
+function isVisible(el) {
+  return !!(el && el.offsetParent !== null && (el.innerText || '').trim());
+}
+
+/* Prefer an absolute-timestamp attribute (Gmail/Outlook both expose the full
+   date in a title/aria-label tooltip) over the visible text, which is often a
+   shorthand ("3:00 PM", "Sep 1") or a relative string that Date.parse guesses
+   at unreliably. */
+function absoluteDateFromNode(node) {
+  if (node.getAttribute('title')) return { value: node.getAttribute('title'), attr: 'title' };
+  if (node.getAttribute('aria-label')) return { value: node.getAttribute('aria-label'), attr: 'aria-label' };
+  return { value: node.innerText || '', attr: 'innerText' };
+}
+
+// A calendar invite ("invite.ics") that was sent earlier in a thread often
+// gets re-rendered inline, as its own mini message header (sender, star,
+// reply button, and all) inside the body of whatever message is currently
+// open. That embedded card carries its own .g3 date span for the *invite's*
+// original send time, which is not the timestamp of the email actually on
+// screen — it should be preferred against, but only when something else is
+// available (never let excluding it leave zero candidates and fall to "now").
+function isInsideEmbeddedInviteCard(node) {
+  return !!node.closest('.gE.iv.gt');
+}
+
+const ABSOLUTE_DATE_LOOK_RE = new RegExp(
+  '\\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s*\\d{4}\\b'
+  + '|\\b\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{2,4}\\b',
+  'i'
+);
+
+function looksLikeAbsoluteDate(str) {
+  return !!str && ABSOLUTE_DATE_LOOK_RE.test(str);
+}
+
+// Locates the currently-open message's body once, so both the body text and
+// the date lookup search the same region instead of re-querying separately
+// (and possibly disagreeing on which message is "active").
+function locateBodyContainer() {
+  const gContainers = Array.from(document.querySelectorAll('.a3s, .ii.gt, .gm-email-body')).filter(isVisible);
+  if (gContainers.length > 0) return { node: gContainers[gContainers.length - 1], platform: 'gmail', matchedNodes: gContainers.length };
+
+  // New Outlook (outlook.office.com / outlook.live.com "Monarch" UI) marks the
+  // reading-pane body with a stable aria-label regardless of its ever-rotating
+  // Fluent UI hashed class names — prefer it over the older/broader selectors.
+  const newOutlookContainers = Array.from(document.querySelectorAll('[aria-label="Message body"][role="document"]')).filter(isVisible);
+  if (newOutlookContainers.length > 0) return { node: newOutlookContainers[newOutlookContainers.length - 1], platform: 'outlook', matchedNodes: newOutlookContainers.length };
+
+  const oContainers = Array.from(document.querySelectorAll('[role="document"], .ReadMsgBody, .allowTextSelection')).filter(isVisible);
+  if (oContainers.length > 0) return { node: oContainers[0], platform: 'outlook', matchedNodes: oContainers.length };
+
+  return null;
+}
+
+// Last-resort date lookup: rather than give up and anchor relative words
+// ("tomorrow", "next week") to the live device clock, scan a bounded region
+// around the message (a few levels up from its body, not the whole page —
+// avoids picking up an unrelated date from Gmail's sidebar mini-calendar)
+// for any element whose title/aria-label looks like an absolute date.
+function findFallbackDateNode(bodyContainer) {
+  if (!bodyContainer) return null;
+  let scope = bodyContainer;
+  for (let i = 0; i < 6 && scope.parentElement; i++) scope = scope.parentElement;
+
+  const nodes = Array.from(scope.querySelectorAll('[title], [aria-label]')).filter(isVisible);
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const { value, attr } = absoluteDateFromNode(nodes[i]);
+    if (looksLikeAbsoluteDate(value)) return { value, attr };
+  }
+  return null;
+}
+
+// Gmail sometimes renders its own ML-extracted "smart" event card below a
+// matching message (visible as a small date/time + title card, often with
+// Yes/No/Maybe RSVP buttons). Its data-card-id is a semantic, human-readable
+// identifier ("...extractedsmartmailevent") rather than one of the short
+// hashed class names around it, so it's used as the stable anchor. Google's
+// own extraction is about as authoritative a date/time signal as exists, so
+// when present it's preferred over re-deriving the same thing from prose.
+function findSmartEventCardText(bodyContainer) {
+  if (!bodyContainer) return null;
+  let scope = bodyContainer.node;
+  for (let i = 0; i < 6 && scope.parentElement; i++) scope = scope.parentElement;
+
+  const card = Array.from(scope.querySelectorAll('[data-card-id*="extractedsmartmailevent"]')).filter(isVisible)[0];
+  if (!card) return null;
+
+  const specific = card.querySelector('.HZejI');
+  const raw = specific ? specific.innerText : (card.innerText || '').split('\n')[0];
+  const text = (raw || '').trim();
+  return text || null;
+}
+
+function grabActiveEmailDate(container) {
   let matchedDateStr = "";
-  const gmailTimeTags = document.querySelectorAll('.g3, .xo, span[role="gridcell"], .gE.iv');
-  if (gmailTimeTags.length > 0) matchedDateStr = gmailTimeTags[gmailTimeTags.length - 1].innerText || "";
+  let debugInfo = { source: 'none-fallback-now', attr: null, raw: null };
+
+  const allGmailTags = Array.from(document.querySelectorAll('.g3, .xo, span[role="gridcell"], .gE.iv')).filter(isVisible);
+  const preferredGmailTags = allGmailTags.filter(node => !isInsideEmbeddedInviteCard(node));
+  const gmailTimeTags = preferredGmailTags.length ? preferredGmailTags : allGmailTags;
+  if (gmailTimeTags.length > 0) {
+    const { value, attr } = absoluteDateFromNode(gmailTimeTags[gmailTimeTags.length - 1]);
+    if (value) {
+      matchedDateStr = value;
+      debugInfo = { source: preferredGmailTags.length ? 'gmail-date-node' : 'gmail-date-node-invite-card-fallback', attr, raw: value };
+    }
+  }
 
   if (!matchedDateStr) {
-    const outlookTimeTags = document.querySelectorAll('[data-focusable="true"] span, .allowTextSelection span, .O7Pr6');
+    // New Outlook's reading pane exposes the message's sent/received time via
+    // this stable data-testid, structurally separate from the body container
+    // above — so it's only ever used as the relative-date base, never scanned
+    // as part of the message text itself.
+    const newOutlookDateTags = Array.from(document.querySelectorAll('[data-testid="SentReceivedSavedTime"]')).filter(isVisible);
+    if (newOutlookDateTags.length > 0) {
+      const { value, attr } = absoluteDateFromNode(newOutlookDateTags[newOutlookDateTags.length - 1]);
+      if (value) {
+        matchedDateStr = value;
+        debugInfo = { source: 'outlook-date-node-new-ui', attr, raw: value };
+      }
+    }
+  }
+
+  if (!matchedDateStr) {
+    const outlookTimeTags = Array.from(document.querySelectorAll('[data-focusable="true"] span, .allowTextSelection span, .O7Pr6')).filter(isVisible);
     for (const tag of outlookTimeTags) {
-      const text = tag.innerText || "";
-      if (text.includes("AM") || text.includes("PM") || (text.includes(",") && text.match(/\d/))) {
-        matchedDateStr = text;
+      const { value, attr } = absoluteDateFromNode(tag);
+      if (value.includes("AM") || value.includes("PM") || (value.includes(",") && value.match(/\d/))) {
+        matchedDateStr = value;
+        debugInfo = { source: 'outlook-date-node', attr, raw: value };
         break;
       }
     }
   }
+
+  if (!matchedDateStr) {
+    const fallback = findFallbackDateNode(container ? container.node : null);
+    if (fallback) {
+      matchedDateStr = fallback.value;
+      debugInfo = { source: 'fallback-title-scan', attr: fallback.attr, raw: fallback.value };
+    }
+  }
+
   const parsed = matchedDateStr ? new Date(Date.parse(matchedDateStr)) : new Date();
-  return isNaN(parsed.getTime()) ? new Date() : parsed;
-}
-
-function grabActiveEmailBody() {
-  let text = "";
-  const gContainers = document.querySelectorAll('.a3s, .ii.gt, .gm-email-body');
-  if (gContainers.length > 0) text = gContainers[gContainers.length - 1].innerText;
-
-  if (!text) {
-    const oContainers = document.querySelectorAll('[role="document"], .ReadMsgBody, .allowTextSelection');
-    if (oContainers.length > 0) text = oContainers[0].innerText;
+  if (isNaN(parsed.getTime())) {
+    debugInfo = { source: 'unparseable-fallback-now', attr: debugInfo.attr, raw: matchedDateStr };
   }
-  return text || document.body.innerText || "";
+  return { date: isNaN(parsed.getTime()) ? new Date() : parsed, debug: debugInfo };
 }
 
-/* ---------- Parsing helpers ---------- */
+/* Strip quoted/forwarded content so a date mentioned in an earlier message in
+   the thread doesn't get parsed as part of the current message. */
+function stripQuotedContent(container) {
+  const clone = container.cloneNode(true);
+  clone.querySelectorAll('.gmail_quote, blockquote, .OutlookMessageHeader, .yj6qo, .adL').forEach(el => el.remove());
+  let text = clone.innerText || "";
+  const quoteBoundary = text.search(/\n\s*On .{0,120}wrote:\s*\n/i);
+  if (quoteBoundary > 0) text = text.slice(0, quoteBoundary);
+  return text;
+}
 
-function levenshtein(a, b) {
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+function grabActiveEmailBody(container) {
+  if (!container) return { text: '', debug: { source: 'none', matchedNodes: 0, rawChars: 0, strippedChars: 0 } };
+
+  const raw = container.node.innerText || '';
+  const text = stripQuotedContent(container.node);
+  return {
+    text,
+    debug: {
+      source: `${container.platform}-body`,
+      matchedNodes: container.matchedNodes,
+      rawChars: raw.length,
+      strippedChars: raw.length - text.length
     }
-  }
-  return dp[m][n];
+  };
 }
 
-function matchWeekdayToken(word) {
-  word = word.toLowerCase().replace(/[^a-z]/g, '');
-  if (word.length < 4) return null;
-  let best = null, bestDist = Infinity;
-  for (const day of DAYS) {
-    const threshold = day.length <= 6 ? 1 : 2;
-    const dist = levenshtein(word, day);
-    if (dist <= threshold && dist < bestDist) { bestDist = dist; best = day; }
-  }
-  return best;
+/* ---------- Parsing ---------- */
+
+function cleanDocumentTitle() {
+  if (!document.title) return "Scheduled Event";
+  return document.title
+    .replace(/ - Outlook| - Gmail/ig, "")
+    // Gmail's tab title often ends with the signed-in account's own email
+    // (e.g. "Subject - Sender Name - me@gmail.com - Gmail") — strip it so
+    // the account owner's address doesn't leak into the event title.
+    .replace(/ - [\w.+-]+@[\w-]+\.[a-z]{2,}\s*$/i, "")
+    .trim();
 }
 
-function isNextWord(word) {
-  word = (word || '').toLowerCase().replace(/[^a-z]/g, '');
-  return word === 'next' || (word.length >= 3 && levenshtein(word, 'next') <= 1);
-}
-
-function parseDateFromText(text, baseDate) {
-  const lower = text.toLowerCase();
-
-  if (/\btoday\b/.test(lower)) return new Date(baseDate);
-  if (/\btomorrow\b/.test(lower)) {
-    const d = new Date(baseDate);
-    d.setDate(d.getDate() + 1);
-    return d;
-  }
-
-  // Numeric date: 7/25, 7-25-2026
-  const numericDate = lower.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
-  if (numericDate) {
-    const month = parseInt(numericDate[1], 10) - 1;
-    const day = parseInt(numericDate[2], 10);
-    let year = numericDate[3] ? parseInt(numericDate[3], 10) : baseDate.getFullYear();
-    if (year < 100) year += 2000;
-    const d = new Date(year, month, day);
-    if (!isNaN(d.getTime()) && month >= 0 && month < 12) return d;
-  }
-
-  // "July 25th"
-  const monthMatch = lower.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\b/);
-  if (monthMatch) {
-    const month = MONTHS.indexOf(monthMatch[1]);
-    const day = parseInt(monthMatch[2], 10);
-    const d = new Date(baseDate.getFullYear(), month, day);
-    if (d < baseDate) d.setFullYear(d.getFullYear() + 1);
-    return d;
-  }
-
-  // Weekday, with optional (typo-tolerant) "next"
-  const words = lower.split(/[^a-z]+/).filter(Boolean);
-  for (let i = 0; i < words.length; i++) {
-    const day = matchWeekdayToken(words[i]);
-    if (!day) continue;
-    const usedNext = i > 0 && isNextWord(words[i - 1]);
-    let dist = DAYS.indexOf(day) - baseDate.getDay();
-    if (dist <= 0) dist += 7;
-    if (usedNext) dist += 7;
-    const d = new Date(baseDate);
-    d.setDate(baseDate.getDate() + dist);
-    return d;
-  }
-
-  return null;
-}
-
-function parseTimeFromText(text) {
-  const lower = text.toLowerCase();
-  if (/\bnoon\b/.test(lower)) return "12:00";
-  if (/\bmidnight\b/.test(lower)) return "00:00";
-
-  const patterns = [
-    /(?:\bat\b|@)\s*(?<hr>\d{1,2})(?::(?<min>\d{2}))?\s*(?<ampm>am|pm)?/i,
-    /\b(?<hr>\d{1,2}):(?<min>\d{2})\s*(?<ampm>am|pm)?\b/i,
-    /\b(?<hr>\d{1,2})\s*(?<ampm>am|pm)\b/i
-  ];
-
-  for (const re of patterns) {
-    const m = lower.match(re);
-    if (m && m.groups && m.groups.hr) {
-      let hr = parseInt(m.groups.hr, 10);
-      if (hr > 23) continue;
-      const min = m.groups.min || "00";
-      const ampm = m.groups.ampm;
-      if (ampm === "pm" && hr < 12) hr += 12;
-      if (ampm === "am" && hr === 12) hr = 0;
-      if (hr > 23) continue;
-      return `${hr < 10 ? '0' + hr : hr}:${min}`;
-    }
-  }
-  return null;
-}
-
-function formatLocalDate(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function parseTextWithBaseDate(text, baseDate, url) {
+function parseTextWithBaseDate(text, dateTimeText, baseDate, url, bodyDebug, emailDateDebug, smartCardText) {
   const result = {
-    title: document.title ? document.title.replace(/ - Outlook| - Gmail/ig, "").trim() : "Scheduled Event",
-    date: "", time: "10:00", location: "Online", description: ""
+    title: cleanDocumentTitle(),
+    date: "", time: "", location: "", description: ""
   };
 
-  let calculatedDate = parseDateFromText(text, baseDate);
-  if (!calculatedDate) {
-    calculatedDate = new Date(baseDate);
-    calculatedDate.setDate(baseDate.getDate() + 1);
-  }
-  result.date = formatLocalDate(calculatedDate);
+  // When nothing was confidently parsed, leave the field blank rather than
+  // guessing — an unfilled field is an obvious prompt for the user to enter
+  // it themselves, whereas a wrong guess can get synced to their calendar
+  // without them noticing.
+  const dateVerbose = DateParser.parseDateFromTextVerbose(dateTimeText, baseDate);
+  result.date = dateVerbose.date ? DateParser.formatLocalDate(dateVerbose.date) : "";
 
-  const parsedTime = parseTimeFromText(text);
-  if (parsedTime) result.time = parsedTime;
+  const timeVerbose = DateParser.parseTimeInfoVerbose(dateTimeText);
+  result.time = timeVerbose.time || "";
+  if (timeVerbose.range) result.durationMinutes = timeVerbose.range.durationMinutes;
+
+  const locationInfo = DateParser.parseLocationFromText(text);
+  result.location = locationInfo.location || "";
 
   const snippet = text.substring(0, 100).replace(/\n/g, ' ').trim();
-  result.description = `Parsed content: ${snippet}...\n\nSource: ${url}`;
+  const parts = [];
+  if (locationInfo.meetingLink) parts.push(`Join: ${locationInfo.meetingLink}`);
+  if (snippet) parts.push(snippet);
+  parts.push(`Source: ${url}`);
+  result.description = parts.join('\n\n');
+
+  result.debug = { body: bodyDebug, emailDate: emailDateDebug, date: dateVerbose, time: timeVerbose, location: locationInfo, smartCard: smartCardText || null };
 
   return result;
 }

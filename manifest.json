@@ -12,7 +12,8 @@
     "*://mail.google.com/*",
     "*://outlook.live.com/*",
     "*://outlook.office.com/*",
-    "*://outlook.office365.com/*"
+    "*://outlook.office365.com/*",
+    "*://outlook.cloud.microsoft/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -23,9 +24,10 @@
         "*://mail.google.com/*",
         "*://outlook.live.com/*",
         "*://outlook.office.com/*",
-        "*://outlook.office365.com/*"
+        "*://outlook.office365.com/*",
+    "*://outlook.cloud.microsoft/*"
       ],
-      "js": ["content.js"],
+      "js": ["dateParser.js", "content.js"],
       "run_at": "document_idle"
     }
   ],
