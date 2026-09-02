@@ -1,18 +1,20 @@
 {
   "manifest_version": 3,
-  "name": "Auto Scheduler",
-  "version": "2.0.0",
-  "description": "Scrapes relative dates dynamically from email timestamps and exports to Google, Outlook, or Apple Calendar.",
+  "name": "SmartSchedule",
+  "version": "2.1.0",
+  "description": "Parses relative dates from email content and exports events to Google, Outlook, or Apple Calendar.",
   "permissions": [
     "activeTab",
     "contextMenus",
+    "scripting",
     "storage"
   ],
   "host_permissions": [
     "*://mail.google.com/*",
     "*://outlook.live.com/*",
     "*://outlook.office.com/*",
-    "*://outlook.office365.com/*"
+    "*://outlook.office365.com/*",
+    "*://outlook.cloud.microsoft/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -23,13 +25,26 @@
         "*://mail.google.com/*",
         "*://outlook.live.com/*",
         "*://outlook.office.com/*",
-        "*://outlook.office365.com/*"
+        "*://outlook.office365.com/*",
+        "*://outlook.cloud.microsoft/*"
       ],
-      "js": ["content.js"],
+      "js": ["dateParser.js", "content.js"],
       "run_at": "document_idle"
     }
   ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   }
 }
