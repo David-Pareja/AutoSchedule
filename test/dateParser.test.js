@@ -279,7 +279,7 @@ check('regression: a bare "on Tuesday" mention cannot outrank an unlabeled, more
 check('regression: "When" label separated from its content by several blank lines (nested table markup) is still found', () => {
   const base = new Date(2025, 5, 20, 15, 54, 0);
   const text = [
-    'Ryan health. David. Examen medico general. Referidos.',
+    'Health referral appointment.',
     '', '', '',
     'When',
     '', '', '',
